@@ -54,34 +54,40 @@ match = 0
 
 def processFile(scan_input):
   '''
-  processFile function runs the agent command on the bash/terminal and gets the
-  result for the given file
+  processFile runs the agent on the given file and records the outcome.
 
-  :param filepath: The path of the file to be scanned
-  :param similarity: Similarity type of the agent
-  :return: Returns 1 if the result found by agent is correct and otherwise returns false
-  :rtype: int
+  :param scan_input: Tuple of (scanner object, file path)
+  :return: Dict with the file name, expected license, predicted license,
+           status ('ok', 'null' or 'error') and error message if any
+  :rtype: dict
   '''
   scanner = scan_input[0]
   filepath = scan_input[1]
-  if filepath:
-    # Extract Filename from the Path
-    base = os.path.basename(filepath)
-    filename = os.path.splitext(base)[0]
-    # Run Scanner
-    try:
-      temp = scanner.scan(filepath)
-      if temp == -1 or len(temp) == 0:
-        temp = [{'shortname': 'NULL'}]
-      result = temp[0]['shortname']
-      result = result.strip("['']")
-      prCyan("\n" + " ====> " + 'On File: ' + filename)
-      tqdm.write("The Obtained result by agent is: " + result)
-      if filename == result:
-        return 1
-      return 0
-    except Exception:
-      return 0
+  base = os.path.basename(filepath)
+  filename = os.path.splitext(base)[0]
+  record = {
+    'file': base,
+    'expected': filename,
+    'predicted': None,
+    'status': 'ok',
+    'error': None
+  }
+  try:
+    temp = scanner.scan(filepath)
+    if temp == -1 or len(temp) == 0:
+      temp = [{'shortname': 'NULL'}]
+    result = temp[0]['shortname']
+    result = result.strip("['']")
+    prCyan("\n" + " ====> " + 'On File: ' + filename)
+    tqdm.write("The Obtained result by agent is: " + result)
+    record['predicted'] = result
+    if result == 'NULL':
+      record['status'] = 'null'
+  except Exception as e:
+    record['status'] = 'error'
+    record['error'] = str(e)
+    tqdm.write("Error while scanning " + base + ": " + str(e))
+  return record
 
 
 def evaluate(scanner):
@@ -101,11 +107,12 @@ def evaluate(scanner):
       filepath = root + os.sep + file
       fileList.append((scanner, filepath))
 
-  result = process_map(processFile, fileList, max_workers=os.cpu_count())
+  records = process_map(processFile, fileList, max_workers=os.cpu_count())
 
-  # success_count is the count of successfully matched files
-  success_count = sum(result)
-  accuracy = success_count * 100 / len(result)
+  # success_count is the count of files whose predicted license matches the expected one
+  success_count = sum(1 for r in records
+                      if r['status'] == 'ok' and r['predicted'] == r['expected'])
+  accuracy = success_count * 100 / len(records)
   prCyan('Total files scanned = ' + str(len(fileList)))
   prGreen('Successfully matched = ' + str(success_count))
   timeElapsed = time.time() - start_time
